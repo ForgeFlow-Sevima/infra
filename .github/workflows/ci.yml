@@ -1,0 +1,71 @@
+name: Infra CI
+
+on:
+  push:
+    branches:
+      - master
+      - chore/docker-infra
+      - chore/docker-runtime-config
+      - ci/github-actions-infra
+  pull_request:
+    branches:
+      - master
+
+concurrency:
+  group: infra-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose-validation:
+    name: Compose validation and build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout infra
+        uses: actions/checkout@v4
+        with:
+          path: infra
+
+      - name: Checkout backend
+        uses: actions/checkout@v4
+        with:
+          repository: ForgeFlow-Sevima/backend
+          path: backend
+
+      - name: Checkout frontend
+        uses: actions/checkout@v4
+        with:
+          repository: ForgeFlow-Sevima/frontend
+          path: frontend
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve local compose config
+        working-directory: infra
+        run: docker compose --env-file .env.example config > compose.local.resolved.yml
+
+      - name: Validate local compose config
+        working-directory: infra
+        run: docker compose --env-file .env.example config --quiet
+
+      - name: Resolve production compose config
+        working-directory: infra
+        run: docker compose -f compose.prod.yml --env-file .env.production.example config > compose.prod.resolved.yml
+
+      - name: Validate production compose config
+        working-directory: infra
+        run: docker compose -f compose.prod.yml --env-file .env.production.example config --quiet
+
+      - name: Build core services
+        working-directory: infra
+        run: docker compose --env-file .env.example build backend-app frontend
+
+      - name: Upload resolved compose configs
+        uses: actions/upload-artifact@v4
+        with:
+          name: resolved-compose-configs
+          path: |
+            infra/compose.local.resolved.yml
+            infra/compose.prod.resolved.yml
+          retention-days: 7
