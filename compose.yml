@@ -1,0 +1,131 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-forgeflow_db}
+      POSTGRES_USER: ${POSTGRES_USER:-forgeflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-forgeflow_local_password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - forgeflow-internal
+
+  backend-app:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - forgeflow-internal
+
+  backend-init:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: sh -lc "php artisan migrate --force --seed"
+    restart: "no"
+    networks:
+      - forgeflow-internal
+
+  backend-queue:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      backend-init:
+        condition: service_completed_successfully
+    command: sh -lc "php artisan queue:work --tries=1 --timeout=300 --sleep=1"
+    networks:
+      - forgeflow-internal
+
+  backend-scheduler:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      backend-init:
+        condition: service_completed_successfully
+    command: sh -lc "while true; do php artisan workflow:scheduler:run; sleep 60; done"
+    networks:
+      - forgeflow-internal
+
+  backend-nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      backend-app:
+        condition: service_started
+      backend-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./docker/backend-nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../backend/public:/var/www/html/public:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/up >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - forgeflow-internal
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_APP_NAME: ${VITE_APP_NAME:-ForgeFlow}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080/api/v1}
+        VITE_DEV_HOST: ${VITE_DEV_HOST:-0.0.0.0}
+        VITE_DEV_PORT: ${VITE_DEV_PORT:-5173}
+        VITE_AUTH_TOKEN_KEY: ${VITE_AUTH_TOKEN_KEY:-flowforge.token}
+        VITE_AUTH_USER_KEY: ${VITE_AUTH_USER_KEY:-flowforge.user}
+        VITE_AUTH_TENANT_KEY: ${VITE_AUTH_TENANT_KEY:-flowforge.tenant}
+        VITE_DEMO_LOGIN_EMAIL: ${VITE_DEMO_LOGIN_EMAIL:-admin@flowforge.test}
+        VITE_DEMO_LOGIN_PASSWORD: ${VITE_DEMO_LOGIN_PASSWORD:-password}
+        VITE_DEFAULT_USER_NAME: ${VITE_DEFAULT_USER_NAME:-ForgeFlow Admin}
+        VITE_DEFAULT_USER_EMAIL: ${VITE_DEFAULT_USER_EMAIL:-admin@flowforge.test}
+        VITE_SSE_EVENTS_PATH: ${VITE_SSE_EVENTS_PATH:-/runs/:runId/events}
+        VITE_RUN_LOGS_PATH: ${VITE_RUN_LOGS_PATH:-/runs/:runId/logs}
+        VITE_USERS_PATH: ${VITE_USERS_PATH:-/users}
+    restart: unless-stopped
+    depends_on:
+      backend-nginx:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - forgeflow-internal
+
+networks:
+  forgeflow-internal:
+    driver: bridge
+
+volumes:
+  postgres-data:
