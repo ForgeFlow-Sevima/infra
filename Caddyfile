@@ -1,0 +1,15 @@
+flowforge.iandev.my.id {
+    encode gzip zstd
+
+    handle /api/* {
+        reverse_proxy backend-nginx:80
+    }
+
+    handle /up {
+        reverse_proxy backend-nginx:80
+    }
+
+    handle {
+        reverse_proxy frontend:80
+    }
+}
