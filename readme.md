@@ -77,8 +77,8 @@ http://localhost:8080
 Demo login after `backend-init` seeds the database:
 
 ```text
-admin@flowforge.test
-password
+Email: admin@flowforge.test
+Password: password
 ```
 
 Local routing:
