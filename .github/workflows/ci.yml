@@ -43,6 +43,12 @@ jobs:
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Prepare compose env files
+        working-directory: infra
+        run: |
+          cp .env.example .env
+          cp .env.production.example .env.production
+
       - name: Resolve local compose config
         working-directory: infra
         run: docker compose --env-file .env.example config > compose.local.resolved.yml
