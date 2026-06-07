@@ -1,29 +1,68 @@
 # ForgeFlow Infra
 
-Docker orchestration for ForgeFlow local prod-like and VPS production deployments.
+ForgeFlow Infra contains Docker Compose orchestration for the separate ForgeFlow backend and frontend repositories. It supports local prod-like development and production VPS deployment for `flowforge.iandev.my.id`.
 
-## Branch
+## Current Branches
 
-Use these infra branches for Docker orchestration work:
+Use the existing branches below for infra work:
 
 ```bash
-git switch -c chore/docker-infra
-git switch -c chore/docker-production
+git switch master
+git switch chore/docker-infra
+git switch chore/docker-runtime-config
+git switch ci/github-actions-infra
 ```
+
+No separate production-only branch is required for the current infra flow.
+
+## Repository Layout
+
+The expected local and VPS layout is:
+
+```text
+ForgeFlow/
+  backend/
+  frontend/
+  infra/
+```
+
+The Compose files use relative build contexts:
+
+- `../backend` for the Laravel API image.
+- `../frontend` for the React frontend image.
+- `./docker/backend-nginx/default.conf` for the internal backend Nginx proxy.
 
 ## Services
 
-- `frontend`: public gateway on `http://localhost:8080`.
-- `backend-nginx`: internal Laravel nginx proxy.
-- `backend-app`: Laravel PHP-FPM runtime.
-- `backend-init`: one-shot database migration and seeding.
-- `backend-queue`: workflow execution worker.
-- `backend-scheduler`: scheduled workflow runner loop.
-- `postgres`: local PostgreSQL database.
+Local `compose.yml` services:
 
-## Start
+- `postgres`: PostgreSQL database.
+- `backend-app`: Laravel PHP-FPM runtime.
+- `backend-init`: one-shot migration and demo seed job.
+- `backend-queue`: workflow execution queue worker.
+- `backend-scheduler`: scheduled workflow trigger loop.
+- `backend-nginx`: internal Nginx proxy for Laravel public files and `/up` health.
+- `frontend`: browser-facing gateway on `http://localhost:8080`.
+
+Production `compose.prod.yml` adds:
+
+- `caddy`: public HTTPS reverse proxy on ports `80` and `443`.
+- `backend-migrate`: one-shot production migration job without demo seeding.
+- Persistent named volumes for PostgreSQL, backend storage, and Caddy state.
+
+## Local Docker Setup
+
+Create the local environment file and start the stack:
 
 ```bash
+cp .env.example .env
+docker compose up -d --build
+docker compose ps
+```
+
+On Windows PowerShell, use:
+
+```powershell
 copy .env.example .env
 docker compose up -d --build
 docker compose ps
@@ -35,43 +74,65 @@ Open:
 http://localhost:8080
 ```
 
-Demo login:
+Demo login after `backend-init` seeds the database:
 
 ```text
 admin@flowforge.test
 password
 ```
 
-## Logs
+Local routing:
+
+```text
+http://localhost:8080/        -> frontend
+http://localhost:8080/api/*   -> backend API
+http://localhost:8080/up      -> backend health
+```
+
+## Local Operations
+
+View logs:
 
 ```bash
 docker compose logs -f backend-app backend-queue backend-scheduler frontend
 ```
 
-## Smoke Test
+Smoke test:
 
 ```bash
 curl http://localhost:8080/
 curl http://localhost:8080/up
-curl -X POST http://localhost:8080/api/v1/auth/login -H "Content-Type: application/json" -d "{\"email\":\"admin@flowforge.test\",\"password\":\"password\"}"
+curl -X POST http://localhost:8080/api/v1/auth/login -H "Content-Type: application/json" -d '{"email":"admin@flowforge.test","password":"password"}'
 ```
 
-## Reset Local Data
-
-This removes local database volume.
+Reset local data:
 
 ```bash
 docker compose down -v
 docker compose up -d --build
 ```
 
-## Notes
+Validate local Compose config:
 
-- Backend is not exposed directly to the host by default.
-- Browser API traffic uses the same origin through `http://localhost:8080/api/*`.
-- Keep real secrets in `.env`; only `.env.example` is committed.
+```bash
+docker compose --env-file .env.example config --quiet
+```
 
-## Production VPS
+## Environment Files
+
+Committed examples:
+
+- `.env.example` for local Docker.
+- `.env.production.example` for production Docker.
+
+Ignored runtime files:
+
+- `.env`
+- `.env.production`
+
+Keep real secrets only in ignored runtime env files. Vite variables are public browser build variables; backend secrets such as `GEMINI_API_KEY`, `APP_KEY`, and database passwords must stay in backend/infra runtime env files.
+
+## Production VPS Deployment
 
 Production domain:
 
@@ -87,7 +148,7 @@ https://flowforge.iandev.my.id/api/*   -> backend API
 https://flowforge.iandev.my.id/up      -> backend health
 ```
 
-Expected VPS layout:
+Expected VPS path:
 
 ```text
 /home/ian/apps/ForgeFlow/
@@ -95,6 +156,8 @@ Expected VPS layout:
   frontend/
   infra/
 ```
+
+Before starting Caddy, point DNS `flowforge.iandev.my.id` to the VPS public IP.
 
 Start production:
 
@@ -104,6 +167,15 @@ nano .env.production
 docker compose -f compose.prod.yml --env-file .env.production up -d --build
 docker compose -f compose.prod.yml --env-file .env.production ps
 ```
+
+Required production edits in `.env.production`:
+
+- `POSTGRES_PASSWORD`
+- `DB_PASSWORD`
+- `APP_KEY`
+- `GEMINI_API_KEY`
+- `APP_URL=https://flowforge.iandev.my.id`
+- `VITE_API_BASE_URL=https://flowforge.iandev.my.id/api/v1`
 
 Create the first production admin after migrations finish:
 
@@ -132,7 +204,27 @@ curl -X POST https://flowforge.iandev.my.id/api/v1/auth/login \
 Production notes:
 
 - Only Caddy exposes host ports `80` and `443`.
-- `postgres`, `backend-nginx`, `backend-app`, `backend-queue`, `backend-scheduler`, and `frontend` stay internal.
-- `backend-migrate` runs `php artisan migrate --force` only; it does not seed demo data.
+- `postgres`, `backend-nginx`, `backend-app`, `backend-queue`, `backend-scheduler`, and `frontend` stay on the internal Docker network.
+- `backend-migrate` runs `php artisan migrate --force` and does not seed demo data.
 - `backend-storage`, `postgres-data`, `caddy-data`, and `caddy-config` are persistent named volumes.
-- Point DNS `flowforge.iandev.my.id` to the VPS public IP before starting Caddy.
+
+## CI
+
+The current CI branch is `ci/github-actions-infra`.
+
+The infra GitHub Actions workflow:
+
+- Checks out infra into `infra/`.
+- Checks out backend and frontend sibling repositories.
+- Prepares `.env` from `.env.example` and `.env.production` from `.env.production.example` for Compose `env_file` resolution.
+- Validates local Compose with `docker compose --env-file .env.example config --quiet`.
+- Validates production Compose with `docker compose -f compose.prod.yml --env-file .env.production.example config --quiet`.
+- Builds the core `backend-app` and `frontend` services.
+- Uploads resolved Compose config artifacts.
+
+## Trade-offs
+
+- Local Docker exposes one browser-facing port (`8080`) and routes API traffic through the same origin to avoid browser localhost confusion.
+- Production uses Caddy for automatic HTTPS and keeps backend services internal.
+- The production migration service does not seed demo users, so the first admin must be created explicitly.
+- Compose is intentionally split into local and production files to keep local seeding and production HTTPS concerns separate.
