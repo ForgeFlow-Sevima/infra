@@ -130,7 +130,7 @@ Ignored runtime files:
 - `.env`
 - `.env.production`
 
-Keep real secrets only in ignored runtime env files. Vite variables are public browser build variables; backend secrets such as `GEMINI_API_KEY`, `APP_KEY`, and database passwords must stay in backend/infra runtime env files.
+Keep real secrets only in ignored runtime env files. Vite variables are public browser build variables; backend secrets such as `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `APP_KEY`, and database passwords must stay in backend/infra runtime env files.
 
 ## Production VPS Deployment
 
@@ -173,7 +173,8 @@ Required production edits in `.env.production`:
 - `POSTGRES_PASSWORD`
 - `DB_PASSWORD`
 - `APP_KEY`
-- `GEMINI_API_KEY`
+- `OPENROUTER_API_KEY` when `AI_PROVIDER=openrouter`
+- the matching provider key when using another provider, for example `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`
 - `APP_URL=https://flowforge.iandev.my.id`
 - `VITE_API_BASE_URL=https://flowforge.iandev.my.id/api/v1`
 
