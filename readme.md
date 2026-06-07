@@ -81,6 +81,14 @@ Email: admin@flowforge.test
 Password: password
 ```
 
+Live testing URL:
+
+```text
+https://flowforge.iandev.my.id
+```
+
+Use the same demo account above when the testing environment contains seeded demo data.
+
 Local routing:
 
 ```text
